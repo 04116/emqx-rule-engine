@@ -198,6 +198,8 @@ compare(Op, L, R) when is_binary(L), is_number(R) ->
 compare(Op, L, R) ->
     do_compare(Op, L, R).
 
+do_compare(match, L, R) when is_binary(L), is_binary(R) ->
+    emqx_topic:match(L, R);
 do_compare('=', L, R) -> L == R;
 do_compare('>', L, R) -> L > R;
 do_compare('<', L, R) -> L < R;
@@ -205,7 +207,7 @@ do_compare('<=', L, R) -> L =< R;
 do_compare('>=', L, R) -> L >= R;
 do_compare('<>', L, R) -> L /= R;
 do_compare('!=', L, R) -> L /= R;
-do_compare('=~', T, F) -> emqx_topic:match(T, F).
+do_compare('==', L, R) -> L =:= R.
 
 number(Bin) ->
     try binary_to_integer(Bin)
@@ -231,6 +233,8 @@ take_action(#action_instance{id = Id}, Selected, Envs) ->
 
 eval({var, Var}, Input) -> %% nested
     nested_get(emqx_rule_utils:atom_key(Var), Input);
+eval({topic, Var}, Input) -> %% nested
+    eval({var, Var}, Input);
 eval({const, Val}, _Input) ->
     Val;
 eval({payload, Attr}, Input) when is_binary(Attr) ->

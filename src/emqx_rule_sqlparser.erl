@@ -78,7 +78,7 @@ preprocess(#select{fields = Fields, from = Hooks, where = Conditions}) ->
     Froms = [hook(unquote(H)) || H <- Hooks],
     #select{fields = Selected,
             from   = Froms,
-            where  = preprocess_condition(Conditions, as_columns(Selected) ++ fixed_columns(Froms))}.
+            where  = preprocess_condition(Conditions, maps:merge(fixed_columns(Froms), as_columns(Selected)))}.
 
 preprocess_field(<<"*">>) ->
     '*';
@@ -87,7 +87,17 @@ preprocess_field({'as', Field, Alias}) when is_binary(Alias) ->
 preprocess_field(Field) ->
     transform_non_const_field(Field).
 
-preprocess_condition({Op, L, R}, Columns) when ?is_logical(Op) orelse ?is_comp(Op) ->
+preprocess_condition({'=', L, R}, Columns) ->
+    Lh = preprocess_condition(L, Columns),
+    Rh = preprocess_condition(R, Columns),
+    case {is_topic_var(Lh), is_topic_var(Rh)} of
+        {true, _} -> {match, Lh, Rh};
+        {false, true} -> {match, Rh, Lh};
+        {false, false} -> {'=', Lh, Rh}
+    end;
+preprocess_condition({Op, L, R}, Columns) when ?is_arith(Op);
+                                               ?is_logical(Op);
+                                               ?is_comp(Op) ->
     {Op, preprocess_condition(L, Columns), preprocess_condition(R, Columns)};
 preprocess_condition({in, Field, {list, Vals}}, Columns) ->
     {in, transform_field(Field, Columns), {list, [transform_field(Val, Columns) || Val <- Vals]}};
@@ -112,10 +122,13 @@ transform_field(Val, Columns) ->
 do_transform_field(<<"payload.", Attr/binary>>, Columns) ->
     validate_var(<<"payload">>, Columns),
     {payload, parse_nested(Attr)};
-do_transform_field({Op, Arg1, Arg2}, Columns) when ?is_arith(Op) ->
-    {Op, transform_field(Arg1, Columns), transform_field(Arg2, Columns)};
 do_transform_field(Var, Columns) when is_binary(Var) ->
-    {var, validate_var(parse_nested(Var), Columns)};
+    case is_topic(Var, Columns) of
+        false ->
+            {var, validate_var(parse_nested(Var), Columns)};
+        true ->
+            {topic, validate_var(parse_nested(Var), Columns)}
+    end;
 do_transform_field({'fun', Name, Args}, Columns) when is_binary(Name) ->
     Fun = list_to_existing_atom(binary_to_list(Name)),
     {'fun', Fun, [transform_field(Arg, Columns) || Arg <- Args]}.
@@ -131,10 +144,10 @@ transform_non_const_field({'fun', Name, Args}) when is_binary(Name) ->
     {'fun', Fun, [transform_non_const_field(Arg) || Arg <- Args]}.
 
 validate_var(Var, SupportedColumns) ->
-    case {Var, lists:member(Var, SupportedColumns)} of
+    case {Var, maps:is_key(Var, SupportedColumns)} of
         {_, true} -> Var;
         {[TopVar | _], false} ->
-            lists:member(TopVar, SupportedColumns) orelse error({unknown_column, Var}),
+            maps:is_key(TopVar, SupportedColumns) orelse error({unknown_column, Var}),
             Var;
         {_, false} ->
             error({unknown_column, Var})
@@ -151,15 +164,23 @@ is_number_str(_NonStr) ->
     false.
 
 as_columns(Selected) ->
-    as_columns(Selected, []).
+    as_columns(Selected, #{}).
 as_columns([], Acc) -> Acc;
-as_columns([{as, _, Val} | Selected], Acc) ->
-    as_columns(Selected, [Val | Acc]);
+as_columns([{as, {_, OrgVal}, Val} | Selected], Acc) ->
+    as_columns(Selected, Acc#{Val => OrgVal});
 as_columns([_ | Selected], Acc) ->
     as_columns(Selected, Acc).
 
-fixed_columns(Columns) when is_list(Columns) ->
-    lists:flatten([?COLUMNS(Col) || Col <- Columns]).
+fixed_columns(Events) when is_list(Events) ->
+    lists:foldl(
+        fun(Event, Acc) ->
+            fixed_columns(Event, Acc)
+        end, #{}, Events).
+fixed_columns(Event, Acc) ->
+    lists:foldl(
+        fun(Column, Acc0) ->
+            Acc0#{Column => Column}
+        end, Acc, ?COLUMNS(Event)).
 
 transform_alias(Alias) ->
     parse_nested(unquote(Alias)).
@@ -169,6 +190,16 @@ parse_nested(Attr) ->
         [Attr] -> Attr;
         Nested -> Nested
     end.
+
+is_topic(<<"topic">>, _) -> true;
+is_topic(Var, Aliases) ->
+    case maps:find(Var, Aliases) of
+        {ok, <<"topic">>} -> true;
+        _ -> false
+    end.
+
+is_topic_var({topic, _}) -> true;
+is_topic_var(_) -> false.
 
 unquote(Topic) ->
     string:trim(Topic, both, "\"'").

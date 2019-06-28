@@ -619,7 +619,7 @@ t_sqlselect(_Config) ->
                     <<"t2">>,
                     "SELECT payload.x as x "
                     "FROM \"message.publish\" "
-                    "WHERE (topic =~ 't3/#' or topic = 't1') and x = 1"),
+                    "WHERE (topic = 't3/#' or topic = 't1') and x = 1"),
     {ok, Client} = emqx_client:start_link([{username, <<"emqx">>}]),
     {ok, _} = emqx_client:connect(Client),
     {ok, _, _} = emqx_client:subscribe(Client, <<"t2">>, 0),

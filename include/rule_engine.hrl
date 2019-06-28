@@ -112,13 +112,14 @@
 
 %% Compare operators
 -define(is_comp(Op), (Op =:= '=' orelse
-                      Op =:= '=~' orelse
+                      Op =:= '==' orelse
                       Op =:= '>' orelse
                       Op =:= '<' orelse
                       Op =:= '<=' orelse
                       Op =:= '>=' orelse
                       Op =:= '<>' orelse
-                      Op =:= '!=')).
+                      Op =:= '!=' orelse
+                      Op =:= 'match')).
 
 %% Logical operators
 -define(is_logical(Op), (Op =:= 'and' orelse Op =:= 'or')).
